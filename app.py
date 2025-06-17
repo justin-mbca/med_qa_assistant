@@ -3,10 +3,20 @@ import json
 import os
 import faiss
 import numpy as np
+import re
 from sentence_transformers import SentenceTransformer
 
-# 设置页面
+# 页面配置
 st.set_page_config(page_title="医疗问答助手", page_icon="💊")
+
+# 文本标准化处理（清除多余符号、空格）
+def clean_text(text):
+    text = text.strip()
+    text = re.sub(r"[，,]", ",", text)
+    text = re.sub(r"[？?]", "?", text)
+    text = re.sub(r"[！!]", "!", text)
+    text = re.sub(r"\s+", "", text)  # 删除所有空格
+    return text
 
 # 加载模型
 @st.cache_resource
@@ -15,41 +25,44 @@ def load_model():
 
 model = load_model()
 
-# 加载知识库
+# 知识库路径
 KB_PATH = "data/knowledge_base.json"
 
+# 加载知识库
 def load_knowledge():
     if not os.path.exists(KB_PATH):
         return []
     with open(KB_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
+# 保存知识库
 def save_knowledge(kb):
     with open(KB_PATH, "w", encoding="utf-8") as f:
         json.dump(kb, f, ensure_ascii=False, indent=2)
-
-knowledge_base = load_knowledge()
 
 # 构建向量索引
 def build_index(kb):
     if not kb:
         return None, []
-    questions = [item["question"] for item in kb]
-    embeddings = model.encode(questions, convert_to_numpy=True)
+    cleaned_questions = [clean_text(item["question"]) for item in kb]
+    embeddings = model.encode(cleaned_questions, convert_to_numpy=True)
     dim = embeddings.shape[1]
     index = faiss.IndexFlatL2(dim)
     index.add(embeddings)
     return index, embeddings
 
+# 加载知识库并构建索引
+knowledge_base = load_knowledge()
 index, embeddings = build_index(knowledge_base)
 
 # 查询最相似问题
 def search_answer(query, top_k=1):
     if index is None or not knowledge_base:
         return None, 0.0
-    query_vec = model.encode([query], convert_to_numpy=True)
+    cleaned_query = clean_text(query)
+    query_vec = model.encode([cleaned_query], convert_to_numpy=True)
     D, I = index.search(query_vec, top_k)
-    if D[0][0] < 1.0:  # 相似度门槛（越小越相似）
+    if D[0][0] < 1.2:  # 设置容忍度（距离越小越相似）
         return knowledge_base[I[0][0]], D[0][0]
     return None, 0.0
 
