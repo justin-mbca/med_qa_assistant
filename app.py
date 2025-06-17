@@ -9,17 +9,17 @@ from sentence_transformers import SentenceTransformer
 # 页面设置
 st.set_page_config(page_title="医疗问答助手", page_icon="🩺")
 
-# 清洗函数：标准化文本，去除标点与空白
+# 清洗文本：去标点、空白，统一格式
 def clean_text(text):
     text = text.strip()
     text = re.sub(r"[，,]", ",", text)
     text = re.sub(r"[？?]", "?", text)
     text = re.sub(r"[！!]", "!", text)
     text = re.sub(r"\s+", "", text)
-    text = re.sub(r"[,.!?？！。，、]", "", text)  # 删除中英文标点
+    text = re.sub(r"[,.!?？！。，、]", "", text)
     return text
 
-# 加载模型（缓存避免重复加载）
+# 加载模型（使用缓存避免重复加载）
 @st.cache_resource
 def load_model():
     return SentenceTransformer("shibing624/text2vec-base-chinese")
@@ -41,7 +41,7 @@ def save_knowledge(kb):
     with open(KB_PATH, "w", encoding="utf-8") as f:
         json.dump(kb, f, ensure_ascii=False, indent=2)
 
-# 构建索引
+# 构建FAISS索引
 def build_index(kb):
     if not kb:
         return None, []
@@ -52,7 +52,7 @@ def build_index(kb):
     index.add(embeddings)
     return index, embeddings
 
-# 加载和构建索引
+# 加载知识库 & 构建索引
 knowledge_base = load_knowledge()
 index, embeddings = build_index(knowledge_base)
 
@@ -63,18 +63,26 @@ def search_answer(query, top_k=1):
     cleaned_query = clean_text(query)
     query_vec = model.encode([cleaned_query], convert_to_numpy=True)
     D, I = index.search(query_vec, top_k)
-    if D[0][0] < 1.5:  # 更宽松的阈值
+    if D[0][0] < 1.5:  # 设置相似度阈值
         return knowledge_base[I[0][0]], D[0][0]
     return None, 0.0
 
-# 页面结构
+# 主页面
 tab1, tab2 = st.tabs(["💬 问答助手", "📚 添加知识"])
 
 with tab1:
     st.title("🧠 医疗问答助手")
-    st.markdown("请输入症状或问题，我们将根据专家知识库为您提供建议。")
+    st.markdown("请选择一个样例问题，或直接输入您的健康问题，我们将为您提供建议。")
 
-    query = st.text_input("请输入您的健康问题：", key="query_input")
+    # 选择样例问题（前几个）
+    sample_questions = [item["question"] for item in knowledge_base[:5]]
+    sample_questions.insert(0, "🔽 请选择一个样例问题")
+
+    selected = st.selectbox("常见问题：", sample_questions, index=0)
+    default_query = "" if selected == "🔽 请选择一个样例问题" else selected
+
+    # 手动输入问题
+    query = st.text_input("或者输入其他问题：", value=default_query, key="query_input")
 
     if st.button("🔍 查询"):
         if not query.strip():
@@ -87,9 +95,9 @@ with tab1:
                 st.markdown(f"**A：** {result['answer']}")
                 if result.get("tags"):
                     st.caption(f"标签：{'、'.join(result['tags'])}")
-                st.caption(f"相似度匹配分数：{1.0 - score:.2f}")
+                st.caption(f"匹配相似度分数：{1.0 - score:.2f}")
             else:
-                st.error("很抱歉，当前知识库中没有相关答案。欢迎录入新知识！")
+                st.error("❌ 很抱歉，当前知识库中没有相关答案。欢迎录入新知识！")
 
 with tab2:
     st.subheader("📥 添加专家知识")
@@ -107,6 +115,6 @@ with tab2:
             knowledge_base.append(new_entry)
             save_knowledge(knowledge_base)
             index, embeddings = build_index(knowledge_base)
-            st.success("✅ 已成功添加新知识！")
+            st.success("✅ 成功添加新知识！")
         else:
-            st.warning("请输入完整问题和答案。")
+            st.warning("请输入完整的问题和答案。")
