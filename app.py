@@ -1,37 +1,98 @@
 import streamlit as st
-from utils.qa_engine import load_knowledge, build_index, search_answer
-from utils.editor import add_entry
+import json
+import os
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
-st.set_page_config(page_title="医疗问答原型", layout="centered")
-st.title("🩺 医疗智能问答系统（中文原型）")
+# 设置页面
+st.set_page_config(page_title="医疗问答助手", page_icon="💊")
 
-data = load_knowledge()
-questions = [d["question"] for d in data]
-index, _ = build_index(questions)
+# 加载模型
+@st.cache_resource
+def load_model():
+    return SentenceTransformer("shibing624/text2vec-base-chinese")
 
-tab1, tab2 = st.tabs(["👩‍⚕️ 病人咨询", "📚 专家知识录入"])
+model = load_model()
+
+# 加载知识库
+KB_PATH = "data/knowledge_base.json"
+
+def load_knowledge():
+    if not os.path.exists(KB_PATH):
+        return []
+    with open(KB_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_knowledge(kb):
+    with open(KB_PATH, "w", encoding="utf-8") as f:
+        json.dump(kb, f, ensure_ascii=False, indent=2)
+
+knowledge_base = load_knowledge()
+
+# 构建向量索引
+def build_index(kb):
+    if not kb:
+        return None, []
+    questions = [item["question"] for item in kb]
+    embeddings = model.encode(questions, convert_to_numpy=True)
+    dim = embeddings.shape[1]
+    index = faiss.IndexFlatL2(dim)
+    index.add(embeddings)
+    return index, embeddings
+
+index, embeddings = build_index(knowledge_base)
+
+# 查询最相似问题
+def search_answer(query, top_k=1):
+    if index is None or not knowledge_base:
+        return None, 0.0
+    query_vec = model.encode([query], convert_to_numpy=True)
+    D, I = index.search(query_vec, top_k)
+    if D[0][0] < 1.0:  # 相似度门槛（越小越相似）
+        return knowledge_base[I[0][0]], D[0][0]
+    return None, 0.0
+
+# 主界面
+tab1, tab2 = st.tabs(["🤖 问答助手", "📚 专家知识录入"])
 
 with tab1:
-    st.subheader("请输入您的问题或症状")
-    query = st.text_input("例如：我最近胸闷, 头晕，是怎么回事？我有咳嗽、发烧，是不是得了新冠？高血压应该注意什么?")
+    st.title("🧠 医疗问答助手")
+    st.markdown("输入您的健康问题，我们将根据知识库提供参考建议。")
+
+    query = st.text_input("请输入您的问题：", key="query_input")
 
     if st.button("🔍 查询"):
-        if query.strip():
-            result = search_answer(query, data, index, questions)
-            st.markdown(f"**可能相关问题：** {result['question']}")
-            st.success(result["answer"])
+        if not query.strip():
+            st.warning("请输入有效的问题。")
         else:
-            st.warning("请输入一个问题。")
+            result, score = search_answer(query)
+            if result:
+                st.success("找到相关答案：")
+                st.markdown(f"**Q：** {result['question']}")
+                st.markdown(f"**A：** {result['answer']}")
+                if result.get("tags"):
+                    st.caption(f"标签：{'、'.join(result['tags'])}")
+                st.caption(f"相似度：{1.0 - score:.2f}")
+            else:
+                st.error("很抱歉，我还没有相关知识。欢迎添加！")
 
 with tab2:
-    st.subheader("添加或修改知识条目")
-    q = st.text_area("问题")
-    a = st.text_area("答案")
-    tags = st.text_input("标签（可选，用逗号分隔）")
+    st.subheader("📚 添加专家知识")
+    new_q = st.text_input("问题：")
+    new_a = st.text_area("答案：")
+    new_tags = st.text_input("标签（用逗号分隔）")
 
     if st.button("📥 添加新条目"):
-        if q.strip() and a.strip():
-            add_entry(q, a, tags.split(","))
-            st.success("已添加成功！刷新后生效。")
+        if new_q and new_a:
+            new_entry = {
+                "question": new_q.strip(),
+                "answer": new_a.strip(),
+                "tags": [t.strip() for t in new_tags.split(",") if t.strip()]
+            }
+            knowledge_base.append(new_entry)
+            save_knowledge(knowledge_base)
+            index, embeddings = build_index(knowledge_base)
+            st.success("✅ 新知识已添加！")
         else:
-            st.error("请输入完整的问题和答案。")
+            st.warning("请填写完整的问题和答案。")
