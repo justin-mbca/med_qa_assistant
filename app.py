@@ -13,7 +13,7 @@ tab1, tab2 = st.tabs(["👩‍⚕️ 病人咨询", "📚 专家知识录入"])
 
 with tab1:
     st.subheader("请输入您的问题或症状")
-    query = st.text_input("例如：我最近胸闷、头晕，是怎么回事？")
+    query = st.text_input("例如：我最近胸闷, 头晕，是怎么回事？我有咳嗽、发烧，是不是得了新冠？高血压应该注意什么?")
 
     if st.button("🔍 查询"):
         if query.strip():
