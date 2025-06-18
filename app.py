@@ -6,6 +6,7 @@ import numpy as np
 import re
 from sentence_transformers import SentenceTransformer
 
+
 # 页面设置
 st.set_page_config(page_title="医疗问答助手", page_icon="🩺")
 
@@ -57,15 +58,20 @@ knowledge_base = load_knowledge()
 index, embeddings = build_index(knowledge_base)
 
 # 查询函数
+
 def search_answer(query, top_k=1):
     if index is None or not knowledge_base:
         return None, 0.0
     cleaned_query = clean_text(query)
     query_vec = model.encode([cleaned_query], convert_to_numpy=True)
     D, I = index.search(query_vec, top_k)
-    if D[0][0] < 1.5:  # 设置相似度阈值
+    
+    # 相似度距离门限，默认用 L2 距离，数值越小越好
+    threshold = 2.0  # 原来是 1.5，设高一点试试
+    if D[0][0] < threshold:
         return knowledge_base[I[0][0]], D[0][0]
     return None, 0.0
+
 
 # 主页面
 tab1, tab2 = st.tabs(["💬 问答助手", "📚 添加知识"])
@@ -118,3 +124,17 @@ with tab2:
             st.success("✅ 成功添加新知识！")
         else:
             st.warning("请输入完整的问题和答案。")
+
+# ✅ 供外部调用的问答函数
+    
+
+def rag_query_external(question):
+    """外部调用接口，返回最匹配答案字符串"""
+    result, score = search_answer(question)
+    print("🧪 相似度分数 (L2距离):", score)
+    if result:
+        return f"【问题】{result['question']}\n【AI回答】{result['answer']}\n【相似度】{1.0 - score:.2f}"
+    else:
+        return "❌ 当前知识库中未找到相关答案。"
+
+
